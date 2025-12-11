@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Canvas Course Completion Dashboard (Students Only)</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 1100px;
+      margin: 2rem auto;
+      padding: 0 1rem 3rem;
+      background: #f5f5f7;
+    }
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 0.3rem;
+    }
+    h2 {
+      margin-top: 2rem;
+      font-size: 1.2rem;
+    }
+    p, li {
+      font-size: 0.95rem;
+    }
+    form {
+      border: 1px solid #d4d4d8;
+      padding: 1rem;
+      border-radius: 0.75rem;
+      margin-bottom: 1rem;
+      background: #ffffff;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    label {
+      display: block;
+      margin-top: 0.5rem;
+    }
+    button {
+      margin-top: 1rem;
+      padding: 0.45rem 0.9rem;
+      cursor: pointer;
+      border-radius: 0.5rem;
+      border: 1px solid #2563eb;
+      background: #2563eb;
+      color: #ffffff;
+      font-size: 0.95rem;
+    }
+    button:hover {
+      background: #1d4ed8;
+    }
+    #status {
+      margin: 0.5rem 0 1rem;
+      font-size: 0.9rem;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.8rem;
+      margin-top: 0.75rem;
+    }
+    .summary-card {
+      border-radius: 0.75rem;
+      padding: 0.8rem 1rem;
+      background: #ffffff;
+      border: 1px solid #e4e4e7;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .summary-card h3 {
+      margin: 0 0 0.35rem;
+      font-size: 1rem;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .summary-card p {
+      margin: 0.15rem 0;
+      font-size: 0.9rem;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.1rem 0.4rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      background: #e0f2fe;
+      color: #075985;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 0;
+      font-size: 0.9rem;
+    }
+    th, td {
+      border: 1px solid #e4e4e7;
+      padding: 0.35rem 0.5rem;
+      background: #ffffff;
+    }
+    th {
+      background: #f3f4f6;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    #resultsTableWrapper {
+      max-height: 420px;
+      overflow: auto;
+      border-radius: 0.75rem;
+      margin-top: 0.5rem;
+      border: 1px solid #e4e4e7;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      background: #ffffff;
+    }
+    #downloadBtn {
+      margin-top: 0.75rem;
+      display: none;
+      background: #10b981;
+      border-color: #059669;
+    }
+    #downloadBtn:hover {
+      background: #059669;
+    }
+    .status-completed {
+      color: #166534;
+      font-weight: 600;
+    }
+    .status-started {
+      color: #92400e;
+      font-weight: 600;
+    }
+    .status-notstarted {
+      color: #4b5563;
+      font-weight: 600;
+    }
+    .meta-note {
+      font-size: 0.8rem;
+      color: #4b5563;
+      margin-top: 0.3rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Canvas Course Completion Dashboard</h1>
+  <p>
+    Upload one or more <strong>Canvas gradebook CSVs</strong> for any number of courses.
+    This dashboard shows completion status for <strong>students only</strong>
+    (rows where <code>Role = StudentEnrollment</code>).
+  </p>
+  <ul>
+    <li><strong>Completed</strong> – student has a recorded score for every assignment column</li>
+    <li><strong>Started but not complete</strong> – score for ≥1 assignment, but missing at least one</li>
+    <li><strong>Not started</strong> – no recorded scores for any assignment column</li>
+  </ul>
+
+  <form id="completionForm">
+    <label>
+      Canvas CSV files (students only; Teachers/TAs/Designers are ignored):
+      <input type="file" id="csvFiles" accept=".csv" multiple required />
+    </label>
+    <button type="submit">Generate Completion Dashboard</button>
+    <div class="meta-note">
+      Note: Only rows with <code>Role = StudentEnrollment</code> are included.
+      Teachers, TAs, Designers, Observers are excluded.
+    </div>
+  </form>
+
+  <div id="status"></div>
+
+  <h2>Overall Summary (Students Only)</h2>
+  <div id="summaryOverall" class="summary-grid"></div>
+
+  <h2>Per-Course Summary (by CSV file, Students Only)</h2>
+  <div id="summaryPerCourse" class="summary-grid"></div>
+
+  <h2>Detailed Student List (deduplicated by Student ID)</h2>
+  <p class="meta-note">
+    Each student appears at most once across all uploaded files
+    (deduped by SIS User ID → SIS Login ID → Name).
+  </p>
+  <div id="resultsTableWrapper">
+    <table id="resultsTable" style="display:none;">
+      <thead>
+        <tr>
+          <th>Student</th>
+          <th>Student ID (SIS User ID)</th>
+          <th>Email / Login (SIS Login ID)</th>
+          <th>Course (File)</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <button id="downloadBtn">Download Report as CSV</button>
+
+  <!-- PapaParse for CSV parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script>
+    const form = document.getElementById("completionForm");
+    const fileInput = document.getElementById("csvFiles");
+    const statusEl = document.getElementById("status");
+    const summaryOverallEl = document.getElementById("summaryOverall");
+    const summaryPerCourseEl = document.getElementById("summaryPerCourse");
+    const resultsTable = document.getElementById("resultsTable");
+    const resultsTbody = resultsTable.querySelector("tbody");
+    const downloadBtn = document.getElementById("downloadBtn");
+
+    let lastStudentData = []; // store full results for CSV download
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      summaryOverallEl.innerHTML = "";
+      summaryPerCourseEl.innerHTML = "";
+      resultsTbody.innerHTML = "";
+      resultsTable.style.display = "none";
+      downloadBtn.style.display = "none";
+      lastStudentData = [];
+
+      const files = Array.from(fileInput.files || []);
+      if (!files.length) {
+        statusEl.textContent = "Please select at least one Canvas CSV file.";
+        return;
+      }
+
+      statusEl.textContent = "Reading and analyzing CSV files (students only)…";
+
+      try {
+        const allStudents = [];
+
+        for (const file of files) {
+          const rows = await parseCsvFile(file);
+          const studentsForFile = classifyStudentsFromRows(rows, file.name);
+          allStudents.push(...studentsForFile);
+        }
+
+        if (!allStudents.length) {
+          statusEl.textContent = "No student rows (Role = StudentEnrollment) were found in the uploaded files.";
+          return;
+        }
+
+        // DEDUPE BY ID: SIS User ID → SIS Login ID → Name
+        const uniqueStudents = dedupeById(allStudents);
+        lastStudentData = uniqueStudents;
+
+        // Build summaries (on deduplicated data)
+        const { overallSummary, perCourseSummary } = buildSummaries(uniqueStudents);
+
+        renderOverallSummary(overallSummary);
+        renderPerCourseSummary(perCourseSummary);
+        renderTable(uniqueStudents);
+        setupDownload(uniqueStudents);
+
+        statusEl.textContent = "Dashboard generated (students only, deduplicated by ID).";
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error processing files: " + err.message;
+      }
+    });
+
+    // Parse a CSV file with PapaParse, returning an array of row objects
+    function parseCsvFile(file) {
+      return new Promise((resolve, reject) => {
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: "greedy",
+          complete: (results) => {
+            if (results.errors && results.errors.length) {
+              console.warn("PapaParse errors for", file.name, results.errors);
+            }
+            resolve(results.data);
+          },
+          error: (err) => reject(err),
+        });
+      });
+    }
+
+    // Classify students from rows of one CSV:
+    // Completed: has a numeric grade (including 0) for every assignment column
+    // Started but not complete: grade for at least one assignment but missing at least one
+    // Not started: no grades in any assignment column
+    // Only keep Role = StudentEnrollment (real students)
+    function classifyStudentsFromRows(rows, fileName) {
+      if (!rows.length) return [];
+
+      const keys = Object.keys(rows[0]);
+      const idxSection = keys.indexOf("Section");
+      const idxAssignCurrent = keys.indexOf("Assignments Current Points");
+
+      if (idxSection === -1 || idxAssignCurrent === -1 || idxAssignCurrent <= idxSection) {
+        console.warn(
+          `Could not find "Section" and/or "Assignments Current Points" in ${fileName}. Skipping this file.`
+        );
+        return [];
+      }
+
+      const assignmentCols = keys.slice(idxSection + 1, idxAssignCurrent);
+      const result = [];
+
+      for (const row of rows) {
+        const role = (row["Role"] || "").toString().trim();
+        // Skip non-students
+        if (role && role !== "StudentEnrollment") {
+          continue;
+        }
+
+        const studentName = (row["Student"] || "").trim();
+        if (!studentName || studentName === "Points Possible") {
+          // Skip blank and the special Canvas row
+          continue;
+        }
+
+        let numWithScores = 0;
+        const totalAssignments = assignmentCols.length;
+
+        for (const col of assignmentCols) {
+          const raw = row[col];
+          if (raw !== undefined && raw !== null && raw !== "") {
+            const val = parseFloat(raw);
+            if (!isNaN(val)) {
+              numWithScores++;
+            }
+          }
+        }
+
+        let status;
+        if (numWithScores === 0) {
+          status = "Not started";
+        } else if (numWithScores === totalAssignments) {
+          status = "Completed";
+        } else {
+          status = "Started but not complete";
+        }
+
+        result.push({
+          student: studentName,
+          sisUserId: row["SIS User ID"] || "",
+          sisLoginId: row["SIS Login ID"] || "",
+          course: fileName,
+          status,
+        });
+      }
+
+      return result;
+    }
+
+    // Deduplicate students by SIS User ID (fallback: SIS Login ID, then name)
+    function dedupeById(students) {
+      const seen = new Set();
+      const result = [];
+
+      for (const s of students) {
+        const id = s.sisUserId || s.sisLoginId || s.student;
+        if (!id) {
+          // If truly no identifier, just push them (very rare)
+          result.push(s);
+          continue;
+        }
+        if (!seen.has(id)) {
+          seen.add(id);
+          result.push(s);
+        }
+      }
+
+      return result;
+    }
+
+    function buildSummaries(students) {
+      const overall = {
+        total: 0,
+        completed: 0,
+        startedNotComplete: 0,
+        notStarted: 0,
+      };
+      const perCourse = {};
+
+      for (const s of students) {
+        overall.total++;
+        if (!perCourse[s.course]) {
+          perCourse[s.course] = {
+            course: s.course,
+            total: 0,
+            completed: 0,
+            startedNotComplete: 0,
+            notStarted: 0,
+          };
+        }
+        const c = perCourse[s.course];
+        c.total++;
+
+        if (s.status === "Completed") {
+          overall.completed++;
+          c.completed++;
+        } else if (s.status === "Started but not complete") {
+          overall.startedNotComplete++;
+          c.startedNotComplete++;
+        } else if (s.status === "Not started") {
+          overall.notStarted++;
+          c.notStarted++;
+        }
+      }
+
+      return { overallSummary: overall, perCourseSummary: Object.values(perCourse) };
+    }
+
+    function renderOverallSummary(overall) {
+      const total = overall.total || 1; // avoid div-by-zero
+      const completedPct = ((overall.completed / total) * 100).toFixed(1);
+      const startedPct = ((overall.startedNotComplete / total) * 100).toFixed(1);
+      const notStartedPct = ((overall.notStarted / total) * 100).toFixed(1);
+
+      summaryOverallEl.innerHTML = "";
+
+      const cardTotal = document.createElement("div");
+      cardTotal.className = "summary-card";
+      cardTotal.innerHTML = `
+        <h3>Total Unique Students</h3>
+        <p><span class="badge">All students</span></p>
+        <p><strong>${overall.total}</strong></p>
+      `;
+      summaryOverallEl.appendChild(cardTotal);
+
+      const cardCompleted = document.createElement("div");
+      cardCompleted.className = "summary-card";
+      cardCompleted.innerHTML = `
+        <h3>Completed</h3>
+        <p><strong>${overall.completed}</strong></p>
+        <p>${completedPct}% of students</p>
+      `;
+      summaryOverallEl.appendChild(cardCompleted);
+
+      const cardStarted = document.createElement("div");
+      cardStarted.className = "summary-card";
+      cardStarted.innerHTML = `
+        <h3>Started but Not Complete</h3>
+        <p><strong>${overall.startedNotComplete}</strong></p>
+        <p>${startedPct}% of students</p>
+      `;
+      summaryOverallEl.appendChild(cardStarted);
+
+      const cardNotStarted = document.createElement("div");
+      cardNotStarted.className = "summary-card";
+      cardNotStarted.innerHTML = `
+        <h3>Not Started</h3>
+        <p><strong>${overall.notStarted}</strong></p>
+        <p>${notStartedPct}% of students</p>
+      `;
+      summaryOverallEl.appendChild(cardNotStarted);
+    }
+
+    function renderPerCourseSummary(perCourse) {
+      summaryPerCourseEl.innerHTML = "";
+      for (const c of perCourse) {
+        const total = c.total || 1;
+        const completedPct = ((c.completed / total) * 100).toFixed(1);
+        const startedPct = ((c.startedNotComplete / total) * 100).toFixed(1);
+        const notStartedPct = ((c.notStarted / total) * 100).toFixed(1);
+
+        const card = document.createElement("div");
+        card.className = "summary-card";
+
+        card.innerHTML = `
+          <h3>${c.course}</h3>
+          <p><strong>Total students:</strong> ${c.total}</p>
+          <p><strong>Completed:</strong> ${c.completed} (${completedPct}%)</p>
+          <p><strong>Started but not complete:</strong> ${c.startedNotComplete} (${startedPct}%)</p>
+          <p><strong>Not started:</strong> ${c.notStarted} (${notStartedPct}%)</p>
+        `;
+
+        summaryPerCourseEl.appendChild(card);
+      }
+    }
+
+    function renderTable(students) {
+      if (!students.length) {
+        resultsTable.style.display = "none";
+        return;
+      }
+      resultsTbody.innerHTML = "";
+      for (const s of students) {
+        const tr = document.createElement("tr");
+
+        const tdName = document.createElement("td");
+        tdName.textContent = s.student;
+        tr.appendChild(tdName);
+
+        const tdId = document.createElement("td");
+        tdId.textContent = s.sisUserId;
+        tr.appendChild(tdId);
+
+        const tdLogin = document.createElement("td");
+        tdLogin.textContent = s.sisLoginId;
+        tr.appendChild(tdLogin);
+
+        const tdCourse = document.createElement("td");
+        tdCourse.textContent = s.course;
+        tr.appendChild(tdCourse);
+
+        const tdStatus = document.createElement("td");
+        tdStatus.textContent = s.status;
+        if (s.status === "Completed") {
+          tdStatus.className = "status-completed";
+        } else if (s.status === "Started but not complete") {
+          tdStatus.className = "status-started";
+        } else {
+          tdStatus.className = "status-notstarted";
+        }
+        tr.appendChild(tdStatus);
+
+        resultsTbody.appendChild(tr);
+      }
+      resultsTable.style.display = "table";
+    }
+
+    function setupDownload(students) {
+      if (!students.length) {
+        downloadBtn.style.display = "none";
+        return;
+      }
+      downloadBtn.style.display = "inline-block";
+
+      downloadBtn.onclick = () => {
+        const header = ["Student", "SIS User ID", "SIS Login ID", "Course", "Status"];
+        const lines = [header.join(",")];
+
+        for (const s of students) {
+          const row = [
+            csvEscape(s.student),
+            csvEscape(s.sisUserId),
+            csvEscape(s.sisLoginId),
+            csvEscape(s.course),
+            csvEscape(s.status),
+          ];
+          lines.push(row.join(","));
+        }
+
+        const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "canvas_completion_dashboard_students_only.csv";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+    }
+
+    function csvEscape(value) {
+      const str = (value ?? "").toString();
+      if (str.includes('"') || str.includes(",") || str.includes("\n")) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    }
+  </script>
+</body>
+</html>
