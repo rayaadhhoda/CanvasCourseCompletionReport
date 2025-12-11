@@ -1,10 +1,3 @@
-# CanvasCourseCompletionReport
-Here is a **clean, simple, copy-paste-ready README** formatted for GitHub.
-
-No fluff — just the essentials.
-
----
-
 # Canvas Course Completion Dashboard
 
 This tool analyzes Canvas gradebook CSV files and generates:
