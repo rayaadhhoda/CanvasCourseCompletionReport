@@ -83,21 +83,3 @@ You can download a consolidated CSV containing:
 
 ---
 
-## File Overview
-
-```
-canvas_course_completion_dashboard.html   # Main dashboard tool
-README.md                                 # Documentation
-```
-
----
-
-## Notes
-
-* Everything runs locally — no data leaves your machine.
-* Tool supports any number of CSV uploads.
-* Designed for Canvas standard gradebook exports.
-
----
-
-If you want charts, grouping features, or a hosted version, they can be added easily.
