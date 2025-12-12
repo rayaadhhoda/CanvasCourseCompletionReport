@@ -68,6 +68,7 @@
     .summary-card h3 {
       margin: 0 0 0.35rem;
       font-size: 1rem;
+      /* prevent overflow on long course names */
       word-break: break-word;
       overflow-wrap: anywhere;
     }
@@ -148,7 +149,7 @@
   </p>
   <ul>
     <li><strong>Completed</strong> – student has a recorded score for every assignment column</li>
-    <li><strong>Started but not complete</strong> – score for ≥1 assignment, but missing at least one</li>
+    <li><strong>X of Y assignments completed</strong> – student has partial progress</li>
     <li><strong>Not started</strong> – no recorded scores for any assignment column</li>
   </ul>
 
@@ -176,6 +177,7 @@
   <p class="meta-note">
     Each student appears at most once across all uploaded files
     (deduped by SIS User ID → SIS Login ID → Name).
+    Status shows exact progress, e.g. <em>"3 of 12 assignments completed"</em>.
   </p>
   <div id="resultsTableWrapper">
     <table id="resultsTable" style="display:none;">
@@ -275,10 +277,18 @@
       });
     }
 
+    // Clean up course/file name for display in cards
+    function prettyCourseName(fileName) {
+      let name = fileName.replace(/\.csv$/i, "");
+      name = name.replace(/^\d{4}-\d{2}-\d{2}T\d{4}_/, ""); // strip timestamp prefix
+      name = name.replace(/^Grades-/, ""); // strip "Grades-" prefix
+      return name;
+    }
+
     // Classify students from rows of one CSV:
-    // Completed: has a numeric grade (including 0) for every assignment column
-    // Started but not complete: grade for at least one assignment but missing at least one
+    // Completed: has a numeric grade for every assignment column
     // Not started: no grades in any assignment column
+    // Otherwise: "X of Y assignments completed"
     // Only keep Role = StudentEnrollment (real students)
     function classifyStudentsFromRows(rows, fileName) {
       if (!rows.length) return [];
@@ -295,11 +305,12 @@
       }
 
       const assignmentCols = keys.slice(idxSection + 1, idxAssignCurrent);
+      const totalAssignments = assignmentCols.length;
       const result = [];
 
       for (const row of rows) {
         const role = (row["Role"] || "").toString().trim();
-        // Skip non-students
+        // 🔹 Skip non-students
         if (role && role !== "StudentEnrollment") {
           continue;
         }
@@ -311,8 +322,6 @@
         }
 
         let numWithScores = 0;
-        const totalAssignments = assignmentCols.length;
-
         for (const col of assignmentCols) {
           const raw = row[col];
           if (raw !== undefined && raw !== null && raw !== "") {
@@ -329,7 +338,7 @@
         } else if (numWithScores === totalAssignments) {
           status = "Completed";
         } else {
-          status = "Started but not complete";
+          status = `${numWithScores} of ${totalAssignments} assignments completed`;
         }
 
         result.push({
@@ -338,13 +347,15 @@
           sisLoginId: row["SIS Login ID"] || "",
           course: fileName,
           status,
+          numWithScores,
+          totalAssignments
         });
       }
 
       return result;
     }
 
-    // Deduplicate students by SIS User ID (fallback: SIS Login ID, then name)
+    // 🔹 Deduplicate students by SIS User ID (fallback: SIS Login ID, then name)
     function dedupeById(students) {
       const seen = new Set();
       const result = [];
@@ -391,12 +402,13 @@
         if (s.status === "Completed") {
           overall.completed++;
           c.completed++;
-        } else if (s.status === "Started but not complete") {
-          overall.startedNotComplete++;
-          c.startedNotComplete++;
         } else if (s.status === "Not started") {
           overall.notStarted++;
           c.notStarted++;
+        } else {
+          // Any "X of Y assignments completed" is partial progress
+          overall.startedNotComplete++;
+          c.startedNotComplete++;
         }
       }
 
@@ -460,7 +472,7 @@
         card.className = "summary-card";
 
         card.innerHTML = `
-          <h3>${c.course}</h3>
+          <h3 title="${c.course}">${prettyCourseName(c.course)}</h3>
           <p><strong>Total students:</strong> ${c.total}</p>
           <p><strong>Completed:</strong> ${c.completed} (${completedPct}%)</p>
           <p><strong>Started but not complete:</strong> ${c.startedNotComplete} (${startedPct}%)</p>
@@ -493,17 +505,17 @@
         tr.appendChild(tdLogin);
 
         const tdCourse = document.createElement("td");
-        tdCourse.textContent = s.course;
+        tdCourse.textContent = prettyCourseName(s.course);
         tr.appendChild(tdCourse);
 
         const tdStatus = document.createElement("td");
         tdStatus.textContent = s.status;
         if (s.status === "Completed") {
           tdStatus.className = "status-completed";
-        } else if (s.status === "Started but not complete") {
-          tdStatus.className = "status-started";
-        } else {
+        } else if (s.status === "Not started") {
           tdStatus.className = "status-notstarted";
+        } else {
+          tdStatus.className = "status-started";
         }
         tr.appendChild(tdStatus);
 
@@ -520,7 +532,15 @@
       downloadBtn.style.display = "inline-block";
 
       downloadBtn.onclick = () => {
-        const header = ["Student", "SIS User ID", "SIS Login ID", "Course", "Status"];
+        const header = [
+          "Student",
+          "SIS User ID",
+          "SIS Login ID",
+          "Course (File)",
+          "Status",
+          "Num Assignments with Scores",
+          "Total Assignments"
+        ];
         const lines = [header.join(",")];
 
         for (const s of students) {
@@ -530,6 +550,8 @@
             csvEscape(s.sisLoginId),
             csvEscape(s.course),
             csvEscape(s.status),
+            csvEscape(s.numWithScores ?? ""),
+            csvEscape(s.totalAssignments ?? "")
           ];
           lines.push(row.join(","));
         }
