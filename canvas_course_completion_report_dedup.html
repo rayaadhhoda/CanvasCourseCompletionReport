@@ -68,7 +68,6 @@
     .summary-card h3 {
       margin: 0 0 0.35rem;
       font-size: 1rem;
-      /* prevent overflow on long course names */
       word-break: break-word;
       overflow-wrap: anywhere;
     }
@@ -148,9 +147,18 @@
     (rows where <code>Role = StudentEnrollment</code>).
   </p>
   <ul>
-    <li><strong>Completed</strong> – student has a recorded score for every assignment column</li>
-    <li><strong>X of Y assignments completed</strong> – student has partial progress</li>
-    <li><strong>Not started</strong> – no recorded scores for any assignment column</li>
+    <li><strong>Required completion</strong> ignores columns with "optional", "bonus", or "extra" in their name.</li>
+    <li><strong>Required status</strong>:
+      <ul>
+        <li><strong>Completed</strong> – recorded score for every required assignment</li>
+        <li><strong>X of Y required assignments completed</strong> – partial progress</li>
+        <li><strong>Not started</strong> – no scores on required assignments</li>
+      </ul>
+    </li>
+    <li><strong>Quizzes metric</strong> in the starters row counts students with
+      <strong>exactly 3 quiz columns</strong> completed (quiz columns are required
+      assignments whose header contains "quiz").
+    </li>
   </ul>
 
   <form id="completionForm">
@@ -167,17 +175,21 @@
 
   <div id="status"></div>
 
-  <h2>Overall Summary (Students Only)</h2>
+  <h2>Overall Required-Content Summary (Students Only)</h2>
   <div id="summaryOverall" class="summary-grid"></div>
 
-  <h2>Per-Course Summary (by CSV file, Students Only)</h2>
+  <h2>Started-Students Required-Content Summary (Students with ≥1 required assignment)</h2>
+  <div id="startedSummary" class="summary-grid"></div>
+
+  <h2>Per-Course Required-Content Summary (by CSV file, Students Only)</h2>
   <div id="summaryPerCourse" class="summary-grid"></div>
 
   <h2>Detailed Student List (deduplicated by Student ID)</h2>
   <p class="meta-note">
     Each student appears at most once across all uploaded files
-    (deduped by SIS User ID → SIS Login ID → Name).
-    Status shows exact progress, e.g. <em>"3 of 12 assignments completed"</em>.
+    (deduped by SIS User ID → SIS Login ID → Name).<br />
+    Status shows required progress, e.g. <em>"3 of 12 required assignments completed"</em>.
+    Optional/bonus work is shown in separate columns and does not affect completion.
   </p>
   <div id="resultsTableWrapper">
     <table id="resultsTable" style="display:none;">
@@ -187,7 +199,13 @@
           <th>Student ID (SIS User ID)</th>
           <th>Email / Login (SIS Login ID)</th>
           <th>Course (File)</th>
-          <th>Status</th>
+          <th>Required Status</th>
+          <th>Required Assignments with Scores</th>
+          <th>Total Required Assignments</th>
+          <th>Quiz Assignments with Scores</th>
+          <th>Total Quiz Assignments</th>
+          <th>Optional/Bonus Assignments with Scores</th>
+          <th>Total Optional/Bonus Assignments</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -203,21 +221,20 @@
     const fileInput = document.getElementById("csvFiles");
     const statusEl = document.getElementById("status");
     const summaryOverallEl = document.getElementById("summaryOverall");
+    const startedSummaryEl = document.getElementById("startedSummary");
     const summaryPerCourseEl = document.getElementById("summaryPerCourse");
     const resultsTable = document.getElementById("resultsTable");
     const resultsTbody = resultsTable.querySelector("tbody");
     const downloadBtn = document.getElementById("downloadBtn");
 
-    let lastStudentData = []; // store full results for CSV download
-
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       summaryOverallEl.innerHTML = "";
+      startedSummaryEl.innerHTML = "";
       summaryPerCourseEl.innerHTML = "";
       resultsTbody.innerHTML = "";
       resultsTable.style.display = "none";
       downloadBtn.style.display = "none";
-      lastStudentData = [];
 
       const files = Array.from(fileInput.files || []);
       if (!files.length) {
@@ -241,14 +258,16 @@
           return;
         }
 
-        // DEDUPE BY ID: SIS User ID → SIS Login ID → Name
         const uniqueStudents = dedupeById(allStudents);
-        lastStudentData = uniqueStudents;
 
-        // Build summaries (on deduplicated data)
-        const { overallSummary, perCourseSummary } = buildSummaries(uniqueStudents);
+        const {
+          overallSummary,
+          perCourseSummary,
+          startedSummary
+        } = buildSummaries(uniqueStudents);
 
         renderOverallSummary(overallSummary);
+        renderStartedSummary(startedSummary);
         renderPerCourseSummary(perCourseSummary);
         renderTable(uniqueStudents);
         setupDownload(uniqueStudents);
@@ -260,7 +279,6 @@
       }
     });
 
-    // Parse a CSV file with PapaParse, returning an array of row objects
     function parseCsvFile(file) {
       return new Promise((resolve, reject) => {
         Papa.parse(file, {
@@ -277,19 +295,13 @@
       });
     }
 
-    // Clean up course/file name for display in cards
     function prettyCourseName(fileName) {
       let name = fileName.replace(/\.csv$/i, "");
-      name = name.replace(/^\d{4}-\d{2}-\d{2}T\d{4}_/, ""); // strip timestamp prefix
-      name = name.replace(/^Grades-/, ""); // strip "Grades-" prefix
+      name = name.replace(/^\d{4}-\d{2}-\d{2}T\d{4}_/, "");
+      name = name.replace(/^Grades-/, "");
       return name;
     }
 
-    // Classify students from rows of one CSV:
-    // Completed: has a numeric grade for every assignment column
-    // Not started: no grades in any assignment column
-    // Otherwise: "X of Y assignments completed"
-    // Only keep Role = StudentEnrollment (real students)
     function classifyStudentsFromRows(rows, fileName) {
       if (!rows.length) return [];
 
@@ -304,41 +316,73 @@
         return [];
       }
 
-      const assignmentCols = keys.slice(idxSection + 1, idxAssignCurrent);
-      const totalAssignments = assignmentCols.length;
+      let assignmentCols = keys.slice(idxSection + 1, idxAssignCurrent);
+
+      // Required vs optional based on header text
+      const requiredCols = assignmentCols.filter(col => {
+        const lc = col.toLowerCase();
+        return !lc.includes("optional") && !lc.includes("bonus") && !lc.includes("extra");
+      });
+
+      const optionalCols = assignmentCols.filter(col => {
+        const lc = col.toLowerCase();
+        return lc.includes("optional") || lc.includes("bonus") || lc.includes("extra");
+      });
+
+      // Among required columns, identify quizzes
+      const quizRequiredCols = requiredCols.filter(col =>
+        col.toLowerCase().includes("quiz")
+      );
+
+      const totalRequired = requiredCols.length;
+      const totalOptional = optionalCols.length;
+      const totalQuizRequired = quizRequiredCols.length;
+
       const result = [];
 
       for (const row of rows) {
         const role = (row["Role"] || "").toString().trim();
-        // 🔹 Skip non-students
-        if (role && role !== "StudentEnrollment") {
-          continue;
-        }
+        if (role && role !== "StudentEnrollment") continue;
 
         const studentName = (row["Student"] || "").trim();
-        if (!studentName || studentName === "Points Possible") {
-          // Skip blank and the special Canvas row
-          continue;
-        }
+        if (!studentName || studentName === "Points Possible") continue;
 
-        let numWithScores = 0;
-        for (const col of assignmentCols) {
+        let requiredScores = 0;
+        for (const col of requiredCols) {
           const raw = row[col];
           if (raw !== undefined && raw !== null && raw !== "") {
             const val = parseFloat(raw);
-            if (!isNaN(val)) {
-              numWithScores++;
-            }
+            if (!isNaN(val)) requiredScores++;
           }
         }
 
-        let status;
-        if (numWithScores === 0) {
-          status = "Not started";
-        } else if (numWithScores === totalAssignments) {
-          status = "Completed";
+        let optionalScores = 0;
+        for (const col of optionalCols) {
+          const raw = row[col];
+          if (raw !== undefined && raw !== null && raw !== "") {
+            const val = parseFloat(raw);
+            if (!isNaN(val)) optionalScores++;
+          }
+        }
+
+        let quizRequiredScores = 0;
+        for (const col of quizRequiredCols) {
+          const raw = row[col];
+          if (raw !== undefined && raw !== null && raw !== "") {
+            const val = parseFloat(raw);
+            if (!isNaN(val)) quizRequiredScores++;
+          }
+        }
+
+        let requiredStatus;
+        if (totalRequired === 0) {
+          requiredStatus = "No required assignments";
+        } else if (requiredScores === 0) {
+          requiredStatus = "Not started";
+        } else if (requiredScores === totalRequired) {
+          requiredStatus = "Completed";
         } else {
-          status = `${numWithScores} of ${totalAssignments} assignments completed`;
+          requiredStatus = `${requiredScores} of ${totalRequired} required assignments completed`;
         }
 
         result.push({
@@ -346,16 +390,19 @@
           sisUserId: row["SIS User ID"] || "",
           sisLoginId: row["SIS Login ID"] || "",
           course: fileName,
-          status,
-          numWithScores,
-          totalAssignments
+          requiredStatus,
+          requiredScores,
+          totalRequired,
+          quizRequiredScores,
+          totalQuizRequired,
+          optionalScores,
+          totalOptional
         });
       }
 
       return result;
     }
 
-    // 🔹 Deduplicate students by SIS User ID (fallback: SIS Login ID, then name)
     function dedupeById(students) {
       const seen = new Set();
       const result = [];
@@ -363,7 +410,6 @@
       for (const s of students) {
         const id = s.sisUserId || s.sisLoginId || s.student;
         if (!id) {
-          // If truly no identifier, just push them (very rare)
           result.push(s);
           continue;
         }
@@ -372,7 +418,6 @@
           result.push(s);
         }
       }
-
       return result;
     }
 
@@ -384,9 +429,16 @@
         notStarted: 0,
       };
       const perCourse = {};
+      const startedSummary = {
+        totalStartedRequired: 0,
+        completed: 0,
+        startedNotComplete: 0,
+        startersWithExactly3Quizzes: 0
+      };
 
       for (const s of students) {
         overall.total++;
+
         if (!perCourse[s.course]) {
           perCourse[s.course] = {
             course: s.course,
@@ -399,24 +451,46 @@
         const c = perCourse[s.course];
         c.total++;
 
-        if (s.status === "Completed") {
+        // Overall required buckets
+        if (s.totalRequired === 0) {
+          overall.notStarted++;
+          c.notStarted++;
+        } else if (s.requiredStatus === "Completed") {
           overall.completed++;
           c.completed++;
-        } else if (s.status === "Not started") {
+        } else if (s.requiredStatus === "Not started") {
           overall.notStarted++;
           c.notStarted++;
         } else {
-          // Any "X of Y assignments completed" is partial progress
           overall.startedNotComplete++;
           c.startedNotComplete++;
         }
+
+        // Starters = >0 required scores
+        if (s.requiredScores > 0) {
+          startedSummary.totalStartedRequired++;
+          if (s.requiredStatus === "Completed") {
+            startedSummary.completed++;
+          } else if (s.requiredStatus !== "No required assignments") {
+            startedSummary.startedNotComplete++;
+          }
+
+          // Prof metric: exactly 3 quizzes completed
+          if (s.quizRequiredScores === 3) {
+            startedSummary.startersWithExactly3Quizzes++;
+          }
+        }
       }
 
-      return { overallSummary: overall, perCourseSummary: Object.values(perCourse) };
+      return {
+        overallSummary: overall,
+        perCourseSummary: Object.values(perCourse),
+        startedSummary
+      };
     }
 
     function renderOverallSummary(overall) {
-      const total = overall.total || 1; // avoid div-by-zero
+      const total = overall.total || 1;
       const completedPct = ((overall.completed / total) * 100).toFixed(1);
       const startedPct = ((overall.startedNotComplete / total) * 100).toFixed(1);
       const notStartedPct = ((overall.notStarted / total) * 100).toFixed(1);
@@ -435,7 +509,7 @@
       const cardCompleted = document.createElement("div");
       cardCompleted.className = "summary-card";
       cardCompleted.innerHTML = `
-        <h3>Completed</h3>
+        <h3>Required Completed</h3>
         <p><strong>${overall.completed}</strong></p>
         <p>${completedPct}% of students</p>
       `;
@@ -444,7 +518,7 @@
       const cardStarted = document.createElement("div");
       cardStarted.className = "summary-card";
       cardStarted.innerHTML = `
-        <h3>Started but Not Complete</h3>
+        <h3>Started but Not Complete (Required)</h3>
         <p><strong>${overall.startedNotComplete}</strong></p>
         <p>${startedPct}% of students</p>
       `;
@@ -453,11 +527,55 @@
       const cardNotStarted = document.createElement("div");
       cardNotStarted.className = "summary-card";
       cardNotStarted.innerHTML = `
-        <h3>Not Started</h3>
+        <h3>Not Started (Required)</h3>
         <p><strong>${overall.notStarted}</strong></p>
         <p>${notStartedPct}% of students</p>
       `;
       summaryOverallEl.appendChild(cardNotStarted);
+    }
+
+    function renderStartedSummary(started) {
+      const total = started.totalStartedRequired || 1;
+      const completedPct = ((started.completed / total) * 100).toFixed(1);
+      const startedOnlyPct = ((started.startedNotComplete / total) * 100).toFixed(1);
+      const quizzes3Pct = ((started.startersWithExactly3Quizzes / total) * 100).toFixed(1);
+
+      startedSummaryEl.innerHTML = "";
+
+      const cardTotal = document.createElement("div");
+      cardTotal.className = "summary-card";
+      cardTotal.innerHTML = `
+        <h3>Students Who Started Required Content</h3>
+        <p><strong>${started.totalStartedRequired}</strong></p>
+      `;
+      startedSummaryEl.appendChild(cardTotal);
+
+      const cardCompleted = document.createElement("div");
+      cardCompleted.className = "summary-card";
+      cardCompleted.innerHTML = `
+        <h3>Required Completed (Among Starters)</h3>
+        <p><strong>${started.completed}</strong></p>
+        <p>${completedPct}% of starters</p>
+      `;
+      startedSummaryEl.appendChild(cardCompleted);
+
+      const cardStartedOnly = document.createElement("div");
+      cardStartedOnly.className = "summary-card";
+      cardStartedOnly.innerHTML = `
+        <h3>Still In Progress (Required)</h3>
+        <p><strong>${started.startedNotComplete}</strong></p>
+        <p>${startedOnlyPct}% of starters</p>
+      `;
+      startedSummaryEl.appendChild(cardStartedOnly);
+
+      const cardQuizzes3 = document.createElement("div");
+      cardQuizzes3.className = "summary-card";
+      cardQuizzes3.innerHTML = `
+        <h3>Starters with 3 Quizzes Completed</h3>
+        <p><strong>${started.startersWithExactly3Quizzes}</strong></p>
+        <p>${quizzes3Pct}% of starters</p>
+      `;
+      startedSummaryEl.appendChild(cardQuizzes3);
     }
 
     function renderPerCourseSummary(perCourse) {
@@ -474,9 +592,9 @@
         card.innerHTML = `
           <h3 title="${c.course}">${prettyCourseName(c.course)}</h3>
           <p><strong>Total students:</strong> ${c.total}</p>
-          <p><strong>Completed:</strong> ${c.completed} (${completedPct}%)</p>
-          <p><strong>Started but not complete:</strong> ${c.startedNotComplete} (${startedPct}%)</p>
-          <p><strong>Not started:</strong> ${c.notStarted} (${notStartedPct}%)</p>
+          <p><strong>Required completed:</strong> ${c.completed} (${completedPct}%)</p>
+          <p><strong>Started but not complete (required):</strong> ${c.startedNotComplete} (${startedPct}%)</p>
+          <p><strong>Not started (required):</strong> ${c.notStarted} (${notStartedPct}%)</p>
         `;
 
         summaryPerCourseEl.appendChild(card);
@@ -509,15 +627,39 @@
         tr.appendChild(tdCourse);
 
         const tdStatus = document.createElement("td");
-        tdStatus.textContent = s.status;
-        if (s.status === "Completed") {
+        tdStatus.textContent = s.requiredStatus;
+        if (s.requiredStatus === "Completed") {
           tdStatus.className = "status-completed";
-        } else if (s.status === "Not started") {
+        } else if (s.requiredStatus === "Not started" || s.requiredStatus === "No required assignments") {
           tdStatus.className = "status-notstarted";
         } else {
           tdStatus.className = "status-started";
         }
         tr.appendChild(tdStatus);
+
+        const tdReqScores = document.createElement("td");
+        tdReqScores.textContent = s.requiredScores;
+        tr.appendChild(tdReqScores);
+
+        const tdReqTotal = document.createElement("td");
+        tdReqTotal.textContent = s.totalRequired;
+        tr.appendChild(tdReqTotal);
+
+        const tdQuizScores = document.createElement("td");
+        tdQuizScores.textContent = s.quizRequiredScores;
+        tr.appendChild(tdQuizScores);
+
+        const tdQuizTotal = document.createElement("td");
+        tdQuizTotal.textContent = s.totalQuizRequired;
+        tr.appendChild(tdQuizTotal);
+
+        const tdOptScores = document.createElement("td");
+        tdOptScores.textContent = s.optionalScores;
+        tr.appendChild(tdOptScores);
+
+        const tdOptTotal = document.createElement("td");
+        tdOptTotal.textContent = s.totalOptional;
+        tr.appendChild(tdOptTotal);
 
         resultsTbody.appendChild(tr);
       }
@@ -537,9 +679,13 @@
           "SIS User ID",
           "SIS Login ID",
           "Course (File)",
-          "Status",
-          "Num Assignments with Scores",
-          "Total Assignments"
+          "Required Status",
+          "Required Assignments with Scores",
+          "Total Required Assignments",
+          "Quiz Assignments with Scores",
+          "Total Quiz Assignments",
+          "Optional/Bonus Assignments with Scores",
+          "Total Optional/Bonus Assignments"
         ];
         const lines = [header.join(",")];
 
@@ -549,9 +695,13 @@
             csvEscape(s.sisUserId),
             csvEscape(s.sisLoginId),
             csvEscape(s.course),
-            csvEscape(s.status),
-            csvEscape(s.numWithScores ?? ""),
-            csvEscape(s.totalAssignments ?? "")
+            csvEscape(s.requiredStatus),
+            csvEscape(s.requiredScores ?? ""),
+            csvEscape(s.totalRequired ?? ""),
+            csvEscape(s.quizRequiredScores ?? ""),
+            csvEscape(s.totalQuizRequired ?? ""),
+            csvEscape(s.optionalScores ?? ""),
+            csvEscape(s.totalOptional ?? "")
           ];
           lines.push(row.join(","));
         }
