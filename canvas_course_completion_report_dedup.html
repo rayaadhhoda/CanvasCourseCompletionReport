@@ -175,11 +175,11 @@
 
   <div id="status"></div>
 
-  <h2>Overall Required-Content Summary (Students Only)</h2>
-  <div id="summaryOverall" class="summary-grid"></div>
-
   <h2>Started-Students Required-Content Summary (Students with ≥1 required assignment)</h2>
   <div id="startedSummary" class="summary-grid"></div>
+
+  <h2>Overall Required-Content Summary (Students Only)</h2>
+  <div id="summaryOverall" class="summary-grid"></div>
 
   <h2>Per-Course Required-Content Summary (by CSV file, Students Only)</h2>
   <div id="summaryPerCourse" class="summary-grid"></div>
@@ -509,7 +509,7 @@
       const cardCompleted = document.createElement("div");
       cardCompleted.className = "summary-card";
       cardCompleted.innerHTML = `
-        <h3>Required Completed</h3>
+        <h3>Required Content Completed</h3>
         <p><strong>${overall.completed}</strong></p>
         <p>${completedPct}% of students</p>
       `;
@@ -518,7 +518,7 @@
       const cardStarted = document.createElement("div");
       cardStarted.className = "summary-card";
       cardStarted.innerHTML = `
-        <h3>Started but Not Complete (Required)</h3>
+        <h3>Started but Not Complete</h3>
         <p><strong>${overall.startedNotComplete}</strong></p>
         <p>${startedPct}% of students</p>
       `;
@@ -527,7 +527,7 @@
       const cardNotStarted = document.createElement("div");
       cardNotStarted.className = "summary-card";
       cardNotStarted.innerHTML = `
-        <h3>Not Started (Required)</h3>
+        <h3>Not Started</h3>
         <p><strong>${overall.notStarted}</strong></p>
         <p>${notStartedPct}% of students</p>
       `;
@@ -553,7 +553,7 @@
       const cardCompleted = document.createElement("div");
       cardCompleted.className = "summary-card";
       cardCompleted.innerHTML = `
-        <h3>Required Completed (Among Starters)</h3>
+        <h3>Required Content Completed</h3>
         <p><strong>${started.completed}</strong></p>
         <p>${completedPct}% of starters</p>
       `;
@@ -562,7 +562,7 @@
       const cardStartedOnly = document.createElement("div");
       cardStartedOnly.className = "summary-card";
       cardStartedOnly.innerHTML = `
-        <h3>Still In Progress (Required)</h3>
+        <h3>Still In Progress</h3>
         <p><strong>${started.startedNotComplete}</strong></p>
         <p>${startedOnlyPct}% of starters</p>
       `;
@@ -593,8 +593,8 @@
           <h3 title="${c.course}">${prettyCourseName(c.course)}</h3>
           <p><strong>Total students:</strong> ${c.total}</p>
           <p><strong>Required completed:</strong> ${c.completed} (${completedPct}%)</p>
-          <p><strong>Started but not complete (required):</strong> ${c.startedNotComplete} (${startedPct}%)</p>
-          <p><strong>Not started (required):</strong> ${c.notStarted} (${notStartedPct}%)</p>
+          <p><strong>Started but not complete:</strong> ${c.startedNotComplete} (${startedPct}%)</p>
+          <p><strong>Not started:</strong> ${c.notStarted} (${notStartedPct}%)</p>
         `;
 
         summaryPerCourseEl.appendChild(card);
